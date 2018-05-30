@@ -13,6 +13,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/denisenkom/go-mssqldb/internal/mstype"
 )
 
 var driverInstance = &Driver{processQueryText: true}
@@ -117,6 +119,12 @@ type Connector struct {
 	// SessionInitSQL is optional. The session will be reset even if
 	// SessionInitSQL is empty.
 	SessionInitSQL string
+
+	extendedTypes []mstype.ExtendedTyper
+}
+
+func (c *Connector) RegisterExtendedType(et mstype.ExtendedTyper) {
+	c.extendedTypes = append(c.extendedTypes, et)
 }
 
 type Conn struct {
@@ -707,7 +715,7 @@ func (r *Rows) ColumnTypeNullable(index int) (nullable, ok bool) {
 }
 
 func makeStrParam(val string) (res param) {
-	res.ti.TypeId = typeNVarChar
+	res.ti.TypeID = mstype.NVarChar
 	res.buffer = str2ucs2(val)
 	res.ti.Size = len(res.buffer)
 	return
@@ -715,30 +723,30 @@ func makeStrParam(val string) (res param) {
 
 func (s *Stmt) makeParam(val driver.Value) (res param, err error) {
 	if val == nil {
-		res.ti.TypeId = typeNull
+		res.ti.TypeID = mstype.Null
 		res.buffer = nil
 		res.ti.Size = 0
 		return
 	}
 	switch val := val.(type) {
 	case int64:
-		res.ti.TypeId = typeIntN
+		res.ti.TypeID = mstype.IntN
 		res.buffer = make([]byte, 8)
 		res.ti.Size = 8
 		binary.LittleEndian.PutUint64(res.buffer, uint64(val))
 	case float64:
-		res.ti.TypeId = typeFltN
+		res.ti.TypeID = mstype.FltN
 		res.ti.Size = 8
 		res.buffer = make([]byte, 8)
 		binary.LittleEndian.PutUint64(res.buffer, math.Float64bits(val))
 	case []byte:
-		res.ti.TypeId = typeBigVarBin
+		res.ti.TypeID = mstype.BigVarBin
 		res.ti.Size = len(val)
 		res.buffer = val
 	case string:
 		res = makeStrParam(val)
 	case bool:
-		res.ti.TypeId = typeBitN
+		res.ti.TypeID = mstype.BitN
 		res.ti.Size = 1
 		res.buffer = make([]byte, 1)
 		if val {
@@ -746,7 +754,7 @@ func (s *Stmt) makeParam(val driver.Value) (res param, err error) {
 		}
 	case time.Time:
 		if s.c.sess.loginAck.TDSVersion >= verTDS73 {
-			res.ti.TypeId = typeDateTimeOffsetN
+			res.ti.TypeID = mstype.DateTimeOffsetN
 			res.ti.Scale = 7
 			res.ti.Size = 10
 			buf := make([]byte, 10)
@@ -766,7 +774,7 @@ func (s *Stmt) makeParam(val driver.Value) (res param, err error) {
 			buf[8] = byte(offset)
 			buf[9] = byte(offset >> 8)
 		} else {
-			res.ti.TypeId = typeDateTimeN
+			res.ti.TypeID = mstype.DateTimeN
 			res.ti.Size = 8
 			res.buffer = make([]byte, 8)
 			ref := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
